@@ -47,9 +47,33 @@ Experimentamos com vários modelos de aprendizado de máquina e técnicas para p
 
 ## Resultados
 
-Os resultados evidenciaram o impacto significativo das técnicas de balanceamento e otimização nas métricas de desempenho para a classe 'Com Vítimas Fatais'. A tabela abaixo resume as métricas de precisão, recall e f1-score para cada modelo e cenário:
+Os resultados evidenciaram o impacto significativo das técnicas de balanceamento e otimização nas métricas de desempenho para a classe 'Com Vítimas Fatais'. A tabela abaixo resume as métricas de precisão, recall e f1-score para cada modelo e cenário, somente para a classe ``'Com Vitimas Fatais'``:
+
+| Modelo                     | Cenário                                 | Precisão | Recall | F1-Score |
+|-----------------------------|--------------------------------------   |----------|--------|----------|
+| Logistic Regression          | Class Weights                           | 0.257    | 0.636  | 0.366    |
+| Logistic Regression          | SMOTE + Class Weights                   | 0.511    | 0.272  | 0.355    |
+| Logistic Regression          | SMOTEENN + Class Weights                | 0.341    | 0.389  | 0.364    |
+| Logistic Regression          | SMOTEENN + Class Weights + GridSearchCV | 0.286    | 0.476  | 0.357    |
+| Random Forest                | Class Weights                           | 0.830    | 0.280  | 0.419    |
+| Random Forest                | SMOTE + Class Weights                   | 0.759    | 0.342  | 0.472    |
+| Random Forest                | SMOTEENN + Class Weights                | 0.458    | 0.483  | 0.470    |
+| Random Forest                | SMOTEENN + Class Weights + GridSearchCV | 0.454    | 0.474  | 0.464    |
+| XGBoost                      | Class Weights                           | 0.423    | 0.590  | 0.493    |
+| XGBoost                      | SMOTE + Class Weights                   | 0.688    | 0.405  | 0.510    |
+| XGBoost                      | SMOTEENN + Class Weights                | 0.494    | 0.507  | 0.500    |
+| XGBoost                      | SMOTEENN + Class Weights + GridSearchCV | 0.452    | 0.545  | 0.494    |
+
 
 ### Análise dos Resultados:
+#### Trade-Off entre Classes
+As técnicas de balanceamento e otimização impactam diretamente no equilíbrio entre Precisão e Recall, criando um trade-off que precisa ser cuidadosamente gerenciado:
+- **Precisão:** Alta Precisão indica que poucas instâncias preditas como 'Com Vítimas Fatais' são falsas positivas. No entanto, focar excessivamente na Precisão pode resultar em baixo Recall, ou seja, o modelo deixa de identificar muitos casos reais dessa classe.
+- **Recall:** Alto Recall significa que o modelo consegue identificar a maioria das instâncias reais de 'Com Vítimas Fatais'. Contudo, isso pode acarretar em baixa Precisão, aumentando o número de falsos positivos.
+
+A aplicação de Class Weights inicialmente aumentou o Recall para todas as classes, mas resultou em variações na Precisão. A introdução de SMOTE melhorou a Precisão e moderadamente a Recall para alguns modelos, enquanto SMOTEENN ofereceu um equilíbrio melhorado entre ambas as métricas. A otimização com GridSearchCV permitiu ajustar os hiperparâmetros para maximizar o F1-Score, que é uma métrica que combina Precisão e Recall, oferecendo uma visão mais equilibrada do desempenho do modelo.
+
+
 - **Melhoria no F1-Score**: Observamos que a combinação de XGBoost com SMOTE + Class Weights atingiu o melhor f1-score para a classe 'Com Vítimas Fatais' (0.510166), tanto com quanto sem pesos nas classes, indicando um bom equilíbrio entre precisão e recall.
 - **Impacto das Técnicas de Balanceamento**: O uso de SMOTE e SMOTEENN aumentou o recall em todos os modelos, demonstrando que o balanceamento das classes ajuda os modelos a identificarem mais casos de acidentes com vítimas fatais.
 - **Efeito dos Pesos nas Classes**: A aplicação de pesos aumentou o recall, especialmente na Regressão Logística, mas em alguns casos reduziu a precisão, refletindo o trade-off entre identificar mais casos positivos e evitar falsos positivos.
@@ -66,18 +90,16 @@ Para facilitar a compreensão dos resultados, apresentamos gráficos que compara
 
 ## Conclusão
 
-O estudo demonstrou que a aplicação de técnicas de balanceamento de classes e otimização de modelos é essencial para melhorar o desempenho na previsão de acidentes com vítimas fatais. As principais conclusões são:
+As técnicas de balanceamento aplicadas tiveram efeitos significativos nas métricas de desempenho para a classe 'Com Vítimas Fatais'. Enquanto a aplicação de Class Weights inicialmente melhorou o Recall, técnicas como SMOTE e SMOTEENN ajudaram a equilibrar as métricas, aumentando tanto a Precisão quanto o Recall em diferentes graus. A otimização de hiperparâmetros com GridSearchCV permitiu ajustes finos, melhorando o F1-Score em alguns casos, embora a Precisão e o Recall nem sempre tenham aumentado simultaneamente.
 
-- **Importância do Balanceamento:** Técnicas como SMOTE e SMOTEENN são eficazes para lidar com desbalanceamento severo, aumentando a capacidade do modelo de detectar a classe minoritária.
-- **Trade-off entre Precisão e Recall:** A aplicação de pesos nas classes melhora o recall, mas pode reduzir a precisão. É importante encontrar um equilíbrio adequado dependendo do contexto e dos objetivos do projeto.
-- **Otimização de Modelos:** A utilização de GridSearchCV para otimização de hiperparâmetros pode levar a melhorias adicionais, embora seja necessário avaliar o custo computacional envolvido.
-
+Este trade-off entre Precisão e Recall é intrínseco ao lidar com classes desbalanceadas. A escolha da técnica de balanceamento e a otimização dos parâmetros do modelo devem ser guiadas pelos objetivos específicos do projeto. No contexto da previsão de acidentes fatais, priorizar o Recall pode ser mais adequado para garantir que a maioria dos casos críticos sejam identificados, mesmo que isso implique em um aumento no número de falsos positivos.
 ## Limitações e Trabalhos Futuros:
 
 - **Qualidade dos Dados:** Algo fundamental seria expandir a nossa base de dados para lidar não somente com ocorrências de 2024 mas também de anos anteriores.
-- **Exploração de Novas Técnicas:** Futuras pesquisas podem explorar outras técnicas de balanceamento (e.g., ADASYN, Tomek Links), algoritmos de aprendizado (e.g., Redes Neurais, SVM) e outras estratégias de feature engineering para aprimorar os modelos.
-- **Deploy:** O próximo passo seria construir uma API utilizando FASTAPI por exemplo e conteinerizar o projeto para fazer o Deploy. Assim como foi feito neste meu outro projeto aqui: ['github.com/pedarias/MLOps-project-regression'](https://github.com/pedarias/MLOps-project-regression).
+- **Exploração de Outras Técnicas de Balanceamento:** Futuras pesquisas podem explorar outras técnicas de balanceamento (e.g., ADASYN, Tomek Links, Cluster-Based Over Sampling), algoritmos de aprendizado (e.g., SVM, Redes Neurais) e outras estratégias de feature engineering para aprimorar os modelos.
+- **Deploy:** O próximo passo seria construir uma API utilizando FastAPI por exemplo e conteinerizar o projeto para fazer o Deploy. Assim como foi feito neste meu outro projeto [aqui](https://github.com/pedarias/MLOps-project-regression).
 
 ## Contribuição
 
 Convidamos feedback, discussões e sugestões para melhoria da comunidade. Sua contribuição é inestimável para refinar nossas abordagens e expandir o impacto desta pesquisa.
+

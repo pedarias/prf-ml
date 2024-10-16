@@ -283,6 +283,13 @@ for model_name, model in models.items():
 
 # Aplicar SMOTE
 X_train_smote, y_train_smote = apply_sampling('SMOTE', X_train, y_train)
+# Exibir gráfico da distribuição de classes após SMOTE
+plt.figure(figsize=(8, 6))
+sns.countplot(x=y_train_smote)
+plt.title('Distribuição de Classes após SMOTE')
+plt.xlabel('Classes')
+plt.ylabel('Frequência')
+plt.show()
 
 # Recalcular os pesos das classes para o novo conjunto
 class_weights_smote = compute_class_weight(
@@ -329,6 +336,13 @@ for model_name, model in models.items():
 
 # Aplicar SMOTEENN
 X_train_smoteenn, y_train_smoteenn = apply_sampling('SMOTEENN', X_train, y_train)
+# Exibir gráfico da distribuição de classes após SMOTEENN
+plt.figure(figsize=(8, 6))
+sns.countplot(x=y_train_smoteenn)
+plt.title('Distribuição de Classes após SMOTEENN')
+plt.xlabel('Classes')
+plt.ylabel('Frequência')
+plt.show()
 
 # Recalcular os pesos das classes para o novo conjunto
 class_weights_smoteenn = compute_class_weight(
@@ -372,6 +386,7 @@ for model_name, model in models.items():
             mlflow.sklearn.log_model(model, artifact_path="model")
 
 # 7.5. Avaliação com SMOTEENN, Class Weights e GridSearchCV
+# 7.5. Avaliação com SMOTEENN, Class Weights e GridSearchCV (sem Logistic Regression)
 
 # Parâmetros para GridSearchCV
 param_grids = {
@@ -385,75 +400,81 @@ param_grids = {
         'n_estimators': [100, 200],
         'max_depth': [3, 6, 10],
         'learning_rate': [0.01, 0.1, 0.2]
-    
-    },
-    'Logistic Regression': {
-        'penalty': ['l2'],
-        'C': [0.1, 1.0, 10.0],
-        'class_weight': [class_weights_smoteenn, 'balanced', None],
-        'solver': ['lbfgs', 'saga']
     }
 }
 
+# Avaliar modelos com SMOTEENN, Class Weights e GridSearchCV
 for model_name, model in models.items():
-    with mlflow.start_run(run_name=f"{model_name} com SMOTEENN + Class Weights + GridSearchCV"):
-        print(f"\nAvaliação do {model_name} com SMOTEENN, Class Weights e GridSearchCV:")
-        param_grid = param_grids[model_name]
-        if model_name == 'XGBoost':
+    if model_name != 'Logistic Regression':  # Remover Logistic Regression dessa parte
+        with mlflow.start_run(run_name=f"{model_name} com SMOTEENN + Class Weights + GridSearchCV"):
+            print(f"\nAvaliação do {model_name} com SMOTEENN, Class Weights e GridSearchCV:")
+
+            param_grid = param_grids[model_name]
             best_model = perform_grid_search(
-                model, param_grid, X_train_smoteenn, y_train_smoteenn, sample_weights=sample_weights_smoteenn)
+                model, param_grid, X_train_smoteenn, y_train_smoteenn,
+                sample_weights=sample_weights_smoteenn if model_name == 'XGBoost' else None)
+
             accuracy, report = train_evaluate_model(
                 best_model, X_train_smoteenn, y_train_smoteenn, X_test, y_test,
-                model_name + " Otimizado com SMOTEENN e Class Weights", sample_weights=sample_weights_smoteenn)
-        else:
-            best_model = perform_grid_search(
-                model, param_grid, X_train_smoteenn, y_train_smoteenn)
-            accuracy, report = train_evaluate_model(
-                best_model, X_train_smoteenn, y_train_smoteenn, X_test, y_test,
-                model_name + " Otimizado com SMOTEENN e Class Weights")
+                model_name + " Otimizado com SMOTEENN e Class Weights", 
+                sample_weights=sample_weights_smoteenn if model_name == 'XGBoost' else None)
 
-        results[(model_name, 'SMOTEENN + Class Weights + GridSearchCV')] = report
+            results[(model_name, 'SMOTEENN + Class Weights + GridSearchCV')] = report
 
-        # Logar parâmetros e métricas no MLflow
-        mlflow.log_param("sampling", "SMOTEENN")
-        mlflow.log_param("model_name", model_name)
+            # Logar no MLflow
+            mlflow.log_param("sampling", "SMOTEENN")
+            mlflow.log_param("model_name", model_name)
 
-        # Preparar os parâmetros para registro
-        params = best_model.get_params()
+            # Preparar e serializar parâmetros do modelo
+            params = best_model.get_params()
+            if 'class_weight' in params:
+                if isinstance(params['class_weight'], dict):
+                    params['class_weight'] = {int(k): float(v) for k, v in params['class_weight'].items()}
+                elif params['class_weight'] is None:
+                    params['class_weight'] = 'None'
+                else:
+                    params['class_weight'] = str(params['class_weight'])
 
-        # Converter 'class_weight' se necessário
-        if 'class_weight' in params:
-            if isinstance(params['class_weight'], dict):
-                # Converter chaves e valores para tipos básicos do Python
-                params['class_weight'] = {int(k): float(v) for k, v in params['class_weight'].items()}
-            elif params['class_weight'] is None:
-                params['class_weight'] = 'None'
-            else:
-                params['class_weight'] = str(params['class_weight'])
+            mlflow.log_params(params)
 
-        # Certificar-se de que todos os valores são serializáveis
-        for key in params:
-            value = params[key]
-            if isinstance(value, (np.integer, np.floating)):
-                params[key] = value.item()
-            elif not isinstance(value, (int, float, str, bool)):
-                params[key] = str(value)
+            mlflow.log_metrics({
+                "accuracy": accuracy,
+                "f1_score_fatal": report['Com Vítimas Fatais']['f1-score'],
+                "recall_fatal": report['Com Vítimas Fatais']['recall'],
+                "precision_fatal": report['Com Vítimas Fatais']['precision']
+            })
 
-        mlflow.log_params(params)
+            # Salvar artefatos
+            mlflow.log_artifact(f"confusion_matrix_{model_name} Otimizado com SMOTEENN e Class Weights.png")
+            mlflow.sklearn.log_model(best_model, artifact_path="model" if model_name != 'XGBoost' else "xgboost")
 
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_metric("f1_score_fatal", report['Com Vítimas Fatais']['f1-score'])
-        mlflow.log_metric("recall_fatal", report['Com Vítimas Fatais']['recall'])
-        mlflow.log_metric("precision_fatal", report['Com Vítimas Fatais']['precision'])
+            # Visualizar e logar as importâncias das features para XGBoost e Random Forest
+            if model_name == 'XGBoost' or model_name == 'Random Forest':
+                feature_importances = best_model.feature_importances_
+                feature_names = X_train_smoteenn.columns
+                importance_df = pd.DataFrame({
+                    'Feature': feature_names,
+                    'Importance': feature_importances
+                }).sort_values(by='Importance', ascending=False)
 
-        # Salvar a matriz de confusão como artefato
-        mlflow.log_artifact(f"confusion_matrix_{model_name} Otimizado com SMOTEENN e Class Weights.png")
+                # Exibir as top 10 features
+                print(f"\nTop 10 Features Mais Importantes para {model_name}:")
+                print(importance_df.head(10))
 
-        # Salvar o modelo
-        if model_name == 'XGBoost':
-            mlflow.xgboost.log_model(best_model, artifact_path="model")
-        else:
-            mlflow.sklearn.log_model(best_model, artifact_path="model")
+                # Visualizar as importâncias das features
+                plt.figure(figsize=(10, 6))
+                sns.barplot(x='Importance', y='Feature', data=importance_df.head(10))
+                plt.title(f'Top 10 Features Mais Importantes - {model_name} Otimizado com SMOTEENN e Class Weights')
+                plt.xlabel('Importância')
+                plt.ylabel('Feature')
+                plt.tight_layout()
+                plt.savefig(f"feature_importances_{model_name}_SMOTEENN_GridSearchCV.png")
+                plt.show()
+                plt.close()
+
+                # Logar a figura como artefato no MLflow
+                mlflow.log_artifact(f"feature_importances_{model_name}_SMOTEENN_GridSearchCV.png")
+
 
 
 # 8. Comparação dos Resultados em uma Tabela
