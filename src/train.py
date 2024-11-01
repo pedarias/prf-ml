@@ -1,210 +1,161 @@
-#src/train.py
+# train.py
 
-import pandas as pd
+# train.py
+
+import os
 import mlflow
-import mlflow.sklearn
-import mlflow.xgboost
-import xgboost as xgb
+from train_utils import (
+    train_evaluate_model, get_sampler, load_data, load_preprocessor, log_mlflow,
+    perform_randomized_search, apply_sampling
+)
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.utils.class_weight import compute_class_weight, compute_sample_weight
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-from imblearn.over_sampling import SMOTE
-from imblearn.combine import SMOTEENN
-from sklearn.model_selection import RandomizedSearchCV
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-import os
-import json
-
-def train_evaluate_model(model, X_train, y_train, X_test, y_test, model_name, sample_weights=None):
-    if sample_weights is not None:
-        model.fit(X_train, y_train, sample_weight=sample_weights)
-    else:
-        model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, target_names=['Sem Vítimas', 'Com Vítimas Feridas', 'Com Vítimas Fatais'], output_dict=True)
-
-    print(f"Modelo: {model_name}")
-    print("Accuracy:", accuracy)
-    print("\nClassification Report:")
-    print(classification_report(y_test, y_pred, target_names=['Sem Vítimas', 'Com Vítimas Feridas', 'Com Vítimas Fatais']))
-
-    cm = confusion_matrix(y_test, y_pred)
-    plt.figure()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Sem Vítimas', 'Com Vítimas Feridas', 'Com Vítimas Fatais'],
-                yticklabels=['Sem Vítimas', 'Com Vítimas Feridas', 'Com Vítimas Fatais'])
-    plt.xlabel('Predito')
-    plt.ylabel('Verdadeiro')
-    plt.title(f'Matriz de Confusão - {model_name}')
-    plt.savefig(f"confusion_matrix_{model_name}.png")
-    plt.close()
-
-    return accuracy, report
-
-def apply_sampling(sampling_technique, X_train, y_train):
-    if sampling_technique == 'SMOTE':
-        sampler = SMOTE(random_state=42)
-    elif sampling_technique == 'SMOTEENN':
-        sampler = SMOTEENN(random_state=42)
-    else:
-        return X_train, y_train
-
-    X_resampled, y_resampled = sampler.fit_resample(X_train, y_train)
-    return X_resampled, y_resampled
-
-def perform_randomized_search(model, param_distributions, X, y, sample_weights=None, scoring='f1_macro'):
-    randomized_search = RandomizedSearchCV(
-        estimator=model,
-        param_distributions=param_distributions,
-        n_iter=50,
-        cv=3,
-        scoring=scoring,
-        n_jobs=-1,
-        random_state=42
-    )
-    if sample_weights is not None:
-        randomized_search.fit(X, y, sample_weight=sample_weights)
-    else:
-        randomized_search.fit(X, y)
-    best_model = randomized_search.best_estimator_
-    print(f"Melhores hiperparâmetros para {model.__class__.__name__}:")
-    print(randomized_search.best_params_)
-    return best_model
-
+import xgboost as xgb
+import lightgbm as lgb
+from catboost import CatBoostClassifier
+from sklearn.pipeline import Pipeline
 
 
 def train_model():
-    mlruns_path = os.path.abspath("./mlruns")
-    mlflow.set_tracking_uri(f"file://{mlruns_path}")  # Use o caminho absoluto
+    from sklearn.base import clone
+    # Configurar o MLflow
+    mlflow.set_tracking_uri("file://" + os.path.abspath("./mlruns"))
+    mlflow.set_experiment("Acidentes de Trânsito - Comparação de Técnicas de Balanceamento")
 
-    X_train = pd.read_csv('../data/processed/train.csv')
-    X_test = pd.read_csv('../data/processed/test.csv')
-    y_train = pd.read_csv('../data/processed/train_labels.csv').values.ravel()
-    y_test = pd.read_csv('../data/processed/test_labels.csv').values.ravel()
+    # Carregar os dados
+    X_train_raw, X_test_raw, y_train, y_test = load_data()
+    preprocessor = load_preprocessor()
 
-    class_weights = compute_class_weight('balanced', classes=np.array([0, 1, 2]), y=y_train)
-    class_weights = dict(zip([0, 1, 2], class_weights))
-    sample_weights = compute_sample_weight('balanced', y=y_train)
+    # Definir as técnicas de balanceamento
+    sampling_techniques = [None, 'RandomUnderSampler', 'SMOTE', 'SMOTEENN', 'TomekLinks']
 
+    # Definir os modelos
     models = {
-        'Random Forest': RandomForestClassifier(class_weight=class_weights, random_state=42),
-        'XGBoost': xgb.XGBClassifier(eval_metric='mlogloss', random_state=42),
-        'Logistic Regression': LogisticRegression(class_weight=class_weights, max_iter=5000, random_state=42)
+        'Random Forest': RandomForestClassifier(random_state=42, n_jobs=-1),
+        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42, n_jobs=-1),
+        'XGBoost': xgb.XGBClassifier(eval_metric='mlogloss', random_state=42, use_label_encoder=False, n_jobs=-1),
+        'LightGBM': lgb.LGBMClassifier(random_state=42, n_jobs=-1),
+        'CatBoost': CatBoostClassifier(random_state=42, verbose=0, thread_count=-1)
     }
 
-    mlflow.set_experiment("Acidentes de Trânsito")
-
-    results = {}
-
-    for model_name, model in models.items():
-        with mlflow.start_run(run_name=f"{model_name} com Class Weights"):
-            if model_name == 'XGBoost':
-                accuracy, report = train_evaluate_model(
-                    model, X_train, y_train, X_test, y_test, model_name + " com Class Weights", sample_weights=sample_weights)
-            else:
-                accuracy, report = train_evaluate_model(
-                    model, X_train, y_train, X_test, y_test, model_name + " com Class Weights")
-            results[(model_name, 'Class Weights')] = report
-
-            mlflow.log_param("sampling", "None")
-            mlflow.log_param("class_weight", "Balanced")
-            mlflow.log_param("model_name", model_name)
-            mlflow.log_metric("accuracy", accuracy)
-            mlflow.log_metric("f1_score_fatal", report['Com Vítimas Fatais']['f1-score'])
-            mlflow.log_metric("recall_fatal", report['Com Vítimas Fatais']['recall'])
-            mlflow.log_metric("precision_fatal", report['Com Vítimas Fatais']['precision'])
-            mlflow.log_artifact(f"confusion_matrix_{model_name} com Class Weights.png")
-
-            if model_name == 'XGBoost':
-                mlflow.xgboost.log_model(model, artifact_path="model")
-            else:
-                mlflow.sklearn.log_model(model, artifact_path="model")
-
-    X_train_smote, y_train_smote = apply_sampling('SMOTE', X_train, y_train)
-    class_weights_smote = compute_class_weight('balanced', classes=np.unique(y_train_smote), y=y_train_smote)
-    class_weights_smote = dict(zip(np.unique(y_train_smote), class_weights_smote))
-    sample_weights_smote = compute_sample_weight('balanced', y=y_train_smote)
-
-    for model_name, model in models.items():
-        with mlflow.start_run(run_name=f"{model_name} com SMOTE e Class Weights"):
-            if model_name == 'XGBoost':
-                model = xgb.XGBClassifier(eval_metric='mlogloss', random_state=42)
-                accuracy, report = train_evaluate_model(
-                    model, X_train_smote, y_train_smote, X_test, y_test, model_name + " com SMOTE e Class Weights", sample_weights=sample_weights_smote)
-            else:
-                model.set_params(class_weight=class_weights_smote)
-                accuracy, report = train_evaluate_model(
-                    model, X_train_smote, y_train_smote, X_test, y_test, model_name + " com SMOTE e Class Weights")
-            results[(model_name, 'SMOTE + Class Weights')] = report
-
-            mlflow.log_param("sampling", "SMOTE")
-            mlflow.log_param("class_weight", "Balanced")
-            mlflow.log_param("model_name", model_name)
-            mlflow.log_metric("accuracy", accuracy)
-            mlflow.log_metric("f1_score_fatal", report['Com Vítimas Fatais']['f1-score'])
-            mlflow.log_metric("recall_fatal", report['Com Vítimas Fatais']['recall'])
-            mlflow.log_metric("precision_fatal", report['Com Vítimas Fatais']['precision'])
-            mlflow.log_artifact(f"confusion_matrix_{model_name} com SMOTE e Class Weights.png")
-
-            if model_name == 'XGBoost':
-                mlflow.xgboost.log_model(model, artifact_path="model")
-            else:
-                mlflow.sklearn.log_model(model, artifact_path="model")
-
-    X_train_smoteenn, y_train_smoteenn = apply_sampling('SMOTEENN', X_train, y_train)
-    class_weights_smoteenn = compute_class_weight('balanced', classes=np.unique(y_train_smoteenn), y=y_train_smoteenn)
-    class_weights_smoteenn = dict(zip(np.unique(y_train_smoteenn), class_weights_smoteenn))
-    sample_weights_smoteenn = compute_sample_weight('balanced', y=y_train_smoteenn)
-
+    # Definir os hiperparâmetros para a busca
     param_distributions_rf = {
-        'n_estimators': [100, 200, 300, 400, 500],
-        'max_depth': [None, 10, 20, 30, 40, 50],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'bootstrap': [True, False]
+        'classifier__n_estimators': [50, 100],
+        'classifier__max_depth': [None, 5],
+        'classifier__min_samples_split': [2, 5],
+        'classifier__min_samples_leaf': [1, 2],
+        'classifier__bootstrap': [True, False]
+    }
+
+    param_distributions_lr = {
+        'classifier__C': [0.1, 1],
+        'classifier__penalty': ['l1', 'l2'],
+        'classifier__solver': ['liblinear', 'saga'],
+        'classifier__max_iter': [500, 1000]
     }
 
     param_distributions_xgb = {
-        'n_estimators': [100, 200, 300, 400, 500],
-        'max_depth': [3, 4, 5, 6, 7, 8, 9, 10],
-        'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.3],
-        'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
-        'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0]
+        'classifier__n_estimators': [50, 100],
+        'classifier__max_depth': [3, 5],
+        'classifier__learning_rate': [0.05, 0.1]
     }
 
-    for model_name, model in models.items():
-        with mlflow.start_run(run_name=f"{model_name} com SMOTEENN e Class Weights"):
-            if model_name == 'XGBoost':
-                model = xgb.XGBClassifier(eval_metric='mlogloss', random_state=42)
-                model = perform_randomized_search(model, param_distributions_xgb, X_train_smoteenn, y_train_smoteenn, sample_weights=sample_weights_smoteenn)
-                accuracy, report = train_evaluate_model(
-                    model, X_train_smoteenn, y_train_smoteenn, X_test, y_test, model_name + " com SMOTEENN e Class Weights", sample_weights=sample_weights_smoteenn)
-            elif model_name == 'Random Forest':
-                model = perform_randomized_search(model, param_distributions_rf, X_train_smoteenn, y_train_smoteenn, sample_weights=sample_weights_smoteenn)
-                accuracy, report = train_evaluate_model(
-                    model, X_train_smoteenn, y_train_smoteenn, X_test, y_test, model_name + " com SMOTEENN e Class Weights")
-            results[(model_name, 'SMOTEENN + Class Weights')] = report
+    param_distributions_lgb = {
+        'classifier__n_estimators': [50, 100],
+        'classifier__num_leaves': [15, 31],
+        'classifier__max_depth': [3, 5],
+        'classifier__learning_rate': [0.05, 0.1],
+        'classifier__min_data_in_leaf': [30, 50],
+        'classifier__feature_fraction': [0.8],
+        'classifier__bagging_fraction': [0.8],
+        'classifier__bagging_freq': [5],
+    }
 
-            mlflow.log_param("sampling", "SMOTEENN")
-            mlflow.log_param("class_weight", "Balanced")
-            mlflow.log_param("model_name", model_name)
-            mlflow.log_metric("accuracy", accuracy)
-            mlflow.log_metric("f1_score_fatal", report['Com Vítimas Fatais']['f1-score'])
-            mlflow.log_metric("recall_fatal", report['Com Vítimas Fatais']['recall'])
-            mlflow.log_metric("precision_fatal", report['Com Vítimas Fatais']['precision'])
-            mlflow.log_artifact(f"confusion_matrix_{model_name} com SMOTEENN e Class Weights.png")
+    param_distributions_cb = {
+        'classifier__iterations': [50, 100],
+        'classifier__depth': [4, 6],
+        'classifier__learning_rate': [0.05, 0.1]
+    }
 
-            if model_name == 'XGBoost':
-                mlflow.xgboost.log_model(model, artifact_path="model")
-            else:
-                mlflow.sklearn.log_model(model, artifact_path="model")
+    param_distributions = {
+        'Random Forest': param_distributions_rf,
+        'Logistic Regression': param_distributions_lr,
+        'XGBoost': param_distributions_xgb,
+        'LightGBM': param_distributions_lgb,
+        'CatBoost': param_distributions_cb
+    }
 
+    # Loop sobre as técnicas de balanceamento
+    for sampling in sampling_techniques:
+        print(f"\nTécnica de balanceamento: {sampling}")
+
+        # Decidir sobre o uso de pesos de classe
+        use_class_weights = sampling is None
+
+        # Aplicar o balanceamento
+        X_resampled, y_resampled, distribution_plot_path = apply_sampling(sampling, X_train_raw, y_train, preprocessor)
+
+        # Loop sobre os modelos
+        for model_name, model in models.items():
+            print(f"\nTreinando o modelo: {model_name}")
+
+            # Clonar o modelo para evitar interferência entre iterações
+            model_clone = clone(model)
+
+            # Configurar pesos de classe se necessário
+            if use_class_weights and hasattr(model_clone, 'class_weight'):
+                model_clone.set_params(class_weight='balanced')
+
+            # Construir o pipeline (sem o sampler)
+            steps = []
+            steps.append(('classifier', model_clone))
+
+            model_pipeline = Pipeline(steps)
+
+            # Definir os hiperparâmetros para a busca
+            params = param_distributions.get(model_name, {})
+
+            # Realizar a busca aleatória de hiperparâmetros
+            print("Iniciando o ajuste de hiperparâmetros...")
+            best_model, best_params = perform_randomized_search(
+                model_pipeline,
+                params,
+                X_resampled,
+                y_resampled,
+                n_iter=5,
+                cv=3
+            )
+
+            # Treinar e avaliar o modelo com os melhores hiperparâmetros
+            metrics_dict, cm_filename, report_str = train_evaluate_model(
+                best_model, X_resampled, y_resampled, X_test_raw, y_test,
+                model_name, sampling, preprocessor=preprocessor, data_preprocessed=True
+            )
+
+            # Preparar parâmetros e métricas para o MLflow
+            params = {
+                "sampling": sampling,
+                "use_class_weights": use_class_weights,
+                "model_name": model_name,
+                **best_params
+            }
+            metrics = metrics_dict
+            artifacts = {
+                "confusion_matrix": cm_filename,
+                "class_distribution": distribution_plot_path  # Adiciona o gráfico de distribuição
+            }
+
+            # Registrar no MLflow
+            run_name = f"{model_name} - {sampling or 'No Sampling'} - {'Class Weights' if use_class_weights else 'No Class Weights'}"
+            log_mlflow(
+                model_name,
+                params,
+                metrics,
+                artifacts,
+                best_model,
+                run_name=run_name,
+                classification_report_str=report_str
+            )
 
 if __name__ == "__main__":
     train_model()
-

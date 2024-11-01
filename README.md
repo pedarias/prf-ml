@@ -2,7 +2,7 @@
 
 ## Introdução
 
-Os acidentes de trânsito representam uma das principais causas de mortalidade global, configurando um sério problema de saúde pública. Em particular, os acidentes com vítimas fatais têm consequências devastadoras, não apenas para as famílias das vítimas, mas também para a sociedade como um todo, impactando sistemas de saúde, econômicos e sociais. A capacidade de prever com precisão se há vítima fatal numa ocorrência desses acidentes pode ser crucial para o desenvolvimento de políticas públicas eficazes e estratégias preventivas. Modelos preditivos podem auxiliar autoridades a identificar fatores contribuintes, permitindo a alocação direcionada de recursos e implementação de medidas preventivas que potencialmente salvam vidas.
+Os acidentes de trânsito representam uma das principais causas de mortalidade global, configurando um sério problema de saúde pública. Em particular, os acidentes com vítimas fatais têm consequências devastadoras, não apenas para as famílias das vítimas, mas também para a sociedade como um todo, impactando sistemas de saúde, econômicos e sociais. A capacidade de prever com precisão se há vítima fatal numa ocorrência desses acidentes pode ser crucial para o desenvolvimento de políticas públicas eficazes e estratégias preventivas. Modelos preditivos podem auxiliar autoridades a identificar *fatores contribuintes*, permitindo a alocação direcionada de recursos e implementação de medidas preventivas que potencialmente salvam vidas.
 
 ## Descrição e Preparação dos Dados
 
@@ -35,15 +35,34 @@ A engenharia de recursos desempenhou um papel crucial em melhorar o poder predit
 
 ## Desenvolvimento e Avaliação de Modelos
 
-Experimentamos com vários modelos de aprendizado de máquina e técnicas para prever melhor os resultados da classe com vítimas fatais:
+Experimentamos com vários modelos de aprendizado de máquina e técnicas para prever melhor os resultados da classe com vítimas fatais. 
+O tratamento de pesos de classe e técnicas de amostragem é realizado de maneira cuidadosa e adaptada a cada cenário específico de treinamento. 
+### Configuração de Pesos de Classe e Amostragem
+O script configura inicialmente os pesos de classe antes de entrar nos loops de treinamento para cada modelo e configuração de amostragem. Esses pesos são calculados para a distribuição original de classes (ou seja, antes da aplicação de qualquer técnica de amostragem como SMOTE ou SMOTEENN). Isso é feito usando compute_class_weight da ``sklearn.utils.class_weight`` para gerar um dicionário de pesos que será aplicado aos modelos que suportam o parâmetro class_weight diretamente.
+Pesos inversamente proporcionais à frequência das classes, penalizando mais os erros cometidos na classe minoritária.
 
-- **Configuração Inicial dos Modelos**: Usando algoritmos de classificação básicos como Regressão Logística, Random Forest e XGBoost, estabelecemos performances de base.
-- **Técnicas de Balanceamento de Classes**: Implementamos técnicas como ponderação de classes e geração de dados sintéticos (SMOTE e SMOTEENN) para tratar o desequilíbrio na variável alvo.
-**SMOTE (Synthetic Minority Over-sampling Technique):** Técnica de oversampling que gera sinteticamente novas instâncias da classe minoritária ('Com Vítimas Fatais') baseando-se em seus vizinhos mais próximos, equilibrando a distribuição das classes.
-**SMOTEENN (SMOTE combinado com Edited Nearest Neighbors):** Combina o SMOTE com o ENN, que realiza undersampling na classe majoritária removendo instâncias próximas à fronteira entre as classes, resultando em um conjunto de dados mais limpo e balanceado.
-**Class Weights (Pesos das Classes):** Aplicamos pesos inversamente proporcionais à frequência das classes durante o treinamento dos modelos, penalizando mais os erros cometidos na classe minoritária. Isso força o modelo a prestar mais atenção à classe 'Com Vítimas Fatais'.
+### Tratamento de Dados e Amostragem
+Para cada modelo, aplicamos diferentes configurações de amostragem (None, SMOTE, SMOTEENN) para entender como cada técnica afeta o desempenho do modelo. Vamos detalhar cada cenário:
 
-- **Ajuste de Hiperparâmetros**: Utilizando `GridSearchCV`, otimizamos os parâmetros do modelo para melhorar o desempenho, focando particularmente no poder preditivo em relação a classe 2.
+- **Cenário "None"**Os pesos são calculados para a distribuição original de classes do conjunto de dados e utilizados diretamente nos modelos. Não é aplicada nenhuma técnica de amostragem. Os dados de treino são usados como estão.
+
+- **Cenário "SMOTE"**O SMOTE é aplicado para reamostrar o conjunto de dados de treino, equilibrando as classes aumentando a quantidade de amostras da classe minoritária. Depois de aplicar o SMOTE, os pesos de classe são recalculados com base na nova distribuição de classes do conjunto reamostrado. Isso é importante porque a distribuição das classes mudou, o que pode alterar a importância relativa das classes no treinamento do modelo.
+
+- **Cenário "SMOTEENN"**Amostragem SMOTEENN combina o SMOTE (Synthetic Minority Over-sampling Technique) com o ENN (Edited Nearest Neighbors), uma técnica de limpeza que pode remover amostras de ambas as classes que são consideradas como ruído. Assim como com o SMOTE, os pesos de classe são recalculados para refletir as mudanças na distribuição das classes após a aplicação do SMOTEENN.
+
+
+## Processo de Treinamento
+Dentro de cada iteração do modelo e configuração de amostragem:
+
+- **Definição do Modelo:** O modelo é (re)definido com os parâmetros atualizados, incluindo os novos pesos de classe, se aplicável.
+
+- **Treinamento:** O modelo é treinado no conjunto de dados de treino (original, SMOTE ou SMOTEENN), utilizando os pesos recalculados, se aplicável.
+
+- **Avaliação:** O modelo é avaliado no conjunto de teste para calcular métricas como acurácia, relatório de classificação e matriz de confusão.
+
+- **Registro no MLflow:** Cada configuração (modelo + técnica de amostragem) é registrada como uma execução separada no MLflow, onde parâmetros, métricas e artefatos (por exemplo, matrizes de confusão) são armazenados.
+
+- **Ajuste de Hiperparâmetros**: Na amostragem com SMOTEENN, utilizamos `RandomizedSearchCV` a fim de otimizarmos os parâmetros do modelo para melhorar o desempenho, focando particularmente no poder preditivo em relação a classe 2('Com vitimas fatais').
 
 ## Resultados
 
