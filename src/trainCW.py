@@ -3,8 +3,8 @@
 import os
 import mlflow
 from train_utils import (
-    train_evaluate_model, get_sampler, load_data, load_preprocessor, log_mlflow,
-    perform_randomized_search, apply_sampling, f1_fatal
+    train_evaluate_model, load_data, load_preprocessor, log_mlflow,
+    perform_randomized_search
 )
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -18,30 +18,33 @@ import numpy as np
 
 def train_model():
     from sklearn.base import clone
-    # Configurar o MLflow
+    # Configure MLflow
     mlflow.set_tracking_uri("file://" + os.path.abspath("./mlruns"))
     mlflow.set_experiment("Acidentes de Trânsito - Pesos nas Classes")
 
-    # Carregar os dados
+    # Load data
     X_train_raw, X_test_raw, y_train, y_test = load_data()
     preprocessor = load_preprocessor()
 
-    # Calcular os pesos das classes
+    # Compute class weights
     classes = np.unique(y_train)
     class_weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
     class_weights_dict = dict(zip(classes, class_weights))
     print("Pesos das classes:", class_weights_dict)
 
-    # Definir os modelos
+    # Preprocess training data
+    X_train = preprocessor.transform(X_train_raw)
+
+    # Define models
     models = {
         'Random Forest': RandomForestClassifier(random_state=42, n_jobs=-1),
-        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42, n_jobs=-1),
+        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
         'XGBoost': xgb.XGBClassifier(eval_metric='mlogloss', random_state=42, use_label_encoder=False, n_jobs=-1),
         'LightGBM': lgb.LGBMClassifier(random_state=42, n_jobs=-1),
         'CatBoost': CatBoostClassifier(random_state=42, verbose=0, thread_count=-1)
     }
 
-    # Definir os hiperparâmetros para a busca
+    # Hyperparameter distributions
     param_distributions_rf = {
         'classifier__n_estimators': [50, 100],
         'classifier__max_depth': [None, 5],
@@ -88,81 +91,60 @@ def train_model():
         'CatBoost': param_distributions_cb
     }
 
-    # Aplicar o pré-processamento aos dados de treinamento
-    X_train = preprocessor.transform(X_train_raw)
-
-    # Loop sobre os modelos
+    # Loop over models
     for model_name, model in models.items():
-        print(f"\nTreinando o modelo: {model_name}")
+        print(f"\nTraining model: {model_name}")
 
-        # Clonar o modelo para evitar interferência entre iterações
         model_clone = clone(model)
 
-        # Configurar pesos de classe
         if hasattr(model_clone, 'class_weight'):
             model_clone.set_params(class_weight=class_weights_dict)
             use_sample_weight = False
         elif model_name == 'CatBoost':
-            # Para CatBoost, usamos o parâmetro 'class_weights'
             model_clone.set_params(class_weights=list(class_weights))
             use_sample_weight = False
-        elif model_name == 'XGBoost':
-            # Para XGBoost, usamos 'scale_pos_weight' para a classe minoritária
-            scale_pos_weight = class_weights[-1]  # Peso da classe 'Com Vítimas Fatais'
-            model_clone.set_params(scale_pos_weight=scale_pos_weight)
-            use_sample_weight = False
         else:
-            # Para modelos que não suportam class_weight, usaremos sample_weight
             use_sample_weight = True
 
-        # Construir o pipeline (apenas o classificador)
-        steps = []
-        steps.append(('classifier', model_clone))
-
+        steps = [('classifier', model_clone)]
         model_pipeline = Pipeline(steps)
 
-        # Definir os hiperparâmetros para a busca
         params = param_distributions.get(model_name, {})
 
-        # Realizar a busca aleatória de hiperparâmetros
-        print("Iniciando o ajuste de hiperparâmetros...")
+        if use_sample_weight:
+            sample_weight_train = np.array([class_weights_dict[label] for label in y_train])
+        else:
+            sample_weight_train = None
+
+        print("Initiating hyperparameter tuning...")
         best_model, best_params = perform_randomized_search(
             model_pipeline,
             params,
             X_train,
             y_train,
             n_iter=5,
-            cv=3
+            cv=3,
+            sample_weight=sample_weight_train  # Pass sample_weight correctly
         )
-
-        # Treinar e avaliar o modelo com os melhores hiperparâmetros
-        if use_sample_weight:
-            sample_weight_train = np.array([class_weights_dict[label] for label in y_train])
-        else:
-            sample_weight_train = None
 
         metrics_dict, cm_filename, report_str = train_evaluate_model(
             best_model, X_train, y_train, X_test_raw, y_test,
-            model_name, sampling=None, preprocessor=preprocessor, data_preprocessed=True,
+            model_name, None, preprocessor, True,
             sample_weight=sample_weight_train
         )
 
-        # Preparar parâmetros e métricas para o MLflow
+        # Prepare parameters and metrics for MLflow
         params = {
             "model_name": model_name,
-            **best_params
+            **best_params,
+            "class_weights": class_weights_dict
         }
-        metrics = {
-            "accuracy": metrics_dict['accuracy'],
-            "f1_score_fatal": metrics_dict['f1_score_fatal'],
-            "recall_fatal": metrics_dict['recall_fatal'],
-            "precision_fatal": metrics_dict['precision_fatal']
-        }
+        metrics = metrics_dict
         artifacts = {
             "confusion_matrix": cm_filename
         }
 
-        # Registrar no MLflow
+        # Log to MLflow
         run_name = f"{model_name} - Class Weights"
         log_mlflow(
             model_name,

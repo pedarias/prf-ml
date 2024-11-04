@@ -187,40 +187,44 @@ def get_sampler(sampling_technique):
 def f1_fatal(y_true, y_pred):
     return f1_score(y_true, y_pred, labels=[2], average='macro')
 
-def perform_randomized_search(model_pipeline, param_distributions, X_train, y_train, n_iter=10, cv=3, scoring=None):
+def perform_randomized_search(estimator, param_distributions, X, y, n_iter=10, cv=3, scoring=None, sample_weight=None):
     """
-    Performs randomized search over hyperparameters with cross-validation.
+    Perform a randomized search with cross-validation.
 
     Parameters:
-    - model_pipeline: The machine learning pipeline.
-    - param_distributions: Dictionary with parameters names as keys and distributions or lists of parameters to try.
-    - X_train: Preprocessed training data.
-    - y_train: Training labels.
-    - n_iter: Number of parameter settings that are sampled.
-    - cv: Number of folds in StratifiedKFold.
-    - scoring: A single string or callable to evaluate the predictions on the test set.
+    - estimator: The pipeline or estimator to tune.
+    - param_distributions: The parameter distributions to explore.
+    - X, y: Training data and labels.
+    - n_iter, cv: Number of iterations and cross-validation folds.
+    - scoring: Scoring function to optimize.
+    - sample_weight: Array of weights that are assigned to individual samples.
 
     Returns:
-    - best_model: The best model found during the search.
-    - best_params: The parameters of the best model.
+    - best_model: The best model from the search.
+    - best_params: The best parameters found.
     """
     if scoring is None:
-        scoring = make_scorer(f1_fatal)
+        scoring = 'accuracy'  # Default to accuracy if no scoring function provided
 
-    cv_strategy = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+    # Adjust the estimator parameters to accept sample weights if provided
+    fit_params = {'classifier__sample_weight': sample_weight} if sample_weight is not None else None
+
     randomized_search = RandomizedSearchCV(
-        estimator=model_pipeline,
+        estimator=estimator,
         param_distributions=param_distributions,
         n_iter=n_iter,
-        cv=cv_strategy,
+        cv=cv,
         scoring=scoring,
         n_jobs=-1,
         random_state=42,
         verbose=1
     )
-    randomized_search.fit(X_train, y_train)
+
+    # Perform the search with or without sample weights
+    randomized_search.fit(X, y, **(fit_params if fit_params else {}))
     best_model = randomized_search.best_estimator_
     best_params = randomized_search.best_params_
+    
     return best_model, best_params
 
 # Define a custom MLflow PyFunc model class

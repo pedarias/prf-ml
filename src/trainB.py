@@ -1,10 +1,10 @@
-# train.py
+# trainB.py
 
 import os
 import mlflow
 from train_utils import (
     train_evaluate_model, load_data, load_preprocessor, log_mlflow,
-    perform_randomized_search
+    perform_randomized_search, apply_sampling
 )
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -13,19 +13,18 @@ import lightgbm as lgb
 from catboost import CatBoostClassifier
 from sklearn.pipeline import Pipeline
 
-
 def train_model():
     from sklearn.base import clone
     # Configure MLflow
     mlflow.set_tracking_uri("file://" + os.path.abspath("./mlruns"))
-    mlflow.set_experiment("Acidentes de Trânsito - Sem Pesos ou Balanceamento")
+    mlflow.set_experiment("Acidentes de Trânsito - Balanceamento sem Pesos nas Classes")
 
     # Load data
     X_train_raw, X_test_raw, y_train, y_test = load_data()
     preprocessor = load_preprocessor()
 
-    # Preprocess the training data
-    X_train = preprocessor.transform(X_train_raw)
+    # Define sampling techniques
+    sampling_techniques = ['RandomUnderSampler', 'SMOTE', 'SMOTEENN', 'TomekLinks']
 
     # Define models
     models = {
@@ -36,6 +35,7 @@ def train_model():
         'CatBoost': CatBoostClassifier(random_state=42, verbose=0, thread_count=-1)
     }
 
+    # Hyperparameter distributions
     # Hyperparameter distributions
     param_distributions_rf = {
         'classifier__n_estimators': [50, 100],
@@ -49,7 +49,7 @@ def train_model():
         'classifier__C': [0.1, 1],
         'classifier__penalty': ['l1', 'l2'],
         'classifier__solver': ['liblinear', 'saga'],
-        'classifier__max_iter': [500, 1000]
+        'classifier__max_iter': [2000, 5000]
     }
 
     param_distributions_xgb = {
@@ -83,39 +83,32 @@ def train_model():
         'CatBoost': param_distributions_cb
     }
 
-    # No sampling techniques
-    sampling_techniques = [None]
-
-    # Loop over the sampling techniques (only None in this case)
+    # Loop over sampling techniques
     for sampling in sampling_techniques:
         print(f"\nTécnica de balanceamento: {sampling}")
 
-        # Since we're not using sampling, use the original training data
-        X_resampled, y_resampled = X_train, y_train
-        distribution_plot_path = None  # No distribution plot since no resampling
+        # Apply sampling
+        X_resampled, y_resampled, distribution_plot_path, _  = apply_sampling(sampling, X_train_raw, y_train, preprocessor)
 
-        # Loop over the models
+        # Loop over models
         for model_name, model in models.items():
             print(f"\nTreinando o modelo: {model_name}")
 
-            # Clone the model to avoid interference between iterations
+            # Clone the model
             model_clone = clone(model)
 
-            # Do not set class weights
-            # Ensure that class_weight is set to None if applicable
+            # Do not apply class weights after resampling
             if hasattr(model_clone, 'class_weight'):
                 model_clone.set_params(class_weight=None)
 
-            # Build the pipeline (only the classifier since preprocessing is already done)
-            steps = []
-            steps.append(('classifier', model_clone))
-
+            # Build the pipeline
+            steps = [('classifier', model_clone)]
             model_pipeline = Pipeline(steps)
 
-            # Define hyperparameters for the search
+            # Define hyperparameters
             params = param_distributions.get(model_name, {})
 
-            # Perform randomized hyperparameter search
+            # Perform hyperparameter tuning
             print("Iniciando o ajuste de hiperparâmetros...")
             best_model, best_params = perform_randomized_search(
                 model_pipeline,
@@ -126,10 +119,10 @@ def train_model():
                 cv=3
             )
 
-            # Train and evaluate the model with the best hyperparameters
+            # Train and evaluate the model
             metrics_dict, cm_filename, report_str = train_evaluate_model(
                 best_model, X_resampled, y_resampled, X_test_raw, y_test,
-                model_name, sampling=None, preprocessor=preprocessor, data_preprocessed=True
+                model_name, sampling=sampling, preprocessor=preprocessor, data_preprocessed=True
             )
 
             # Prepare parameters and metrics for MLflow
@@ -140,11 +133,12 @@ def train_model():
             }
             metrics = metrics_dict
             artifacts = {
-                "confusion_matrix": cm_filename
+                "confusion_matrix": cm_filename,
+                "class_distribution": distribution_plot_path
             }
 
-            # Register in MLflow
-            run_name = f"{model_name} - No Weights or Sampling"
+            # Log to MLflow
+            run_name = f"{model_name} - {sampling} - No Class Weights"
             log_mlflow(
                 model_name,
                 params,
