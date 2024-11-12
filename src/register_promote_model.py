@@ -52,10 +52,10 @@ def register_and_promote_best_model(experiment_name, metric_name, minimum_metric
     print(f"Modelo '{model_name}' versão '{model_version.version}' promovido para produção.")
 
 if __name__ == "__main__":
-    experiment_name = "Acidentes de Trânsito - Comparação de Técnicas de Balanceamento"
+    experiment_name = "Acidentes de Trânsito - Sem Pesos ou Balanceamento"
     metric_name = "f1_score_fatal"
     minimum_metric_threshold = 0.5  # Defina o valor mínimo desejado
-    model_name = 'LightGBM - SMOTE - No Class Weights'
+    model_name = 'XGBoost - No Weights or Sampling'
     production_model_name = "prfml-prod"
     
     register_and_promote_best_model(experiment_name, metric_name, minimum_metric_threshold, model_name, production_model_name)

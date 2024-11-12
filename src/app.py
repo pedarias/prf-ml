@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import pandas as pd
 import mlflow.pyfunc
 import json
+import os
 
 class Data(BaseModel):
     dia_semana: str
@@ -28,9 +29,10 @@ class Data(BaseModel):
 app = FastAPI()
 
 # Carregar o modelo treinado
-model_name = 'LightGBM - SMOTE - No Class Weights'
-model_version = "1"  # Use a versão correta do modelo
-model_uri = f"models:/{model_name}/{model_version}"
+#model_name = 'XGBoost - No Weights or Sampling'
+#model_version = "1"  # Use a versão correta do modelo
+#model_uri = f"models:/{model_name}/{model_version}"
+model_uri = os.path.join(os.path.dirname(__file__), 'mlruns/292569776249877926/f8b56ee81a43429bbe30d8296abb6180/artifacts/model')
 model = mlflow.pyfunc.load_model(model_uri)
 
 # Carregar as colunas esperadas pelo modelo
