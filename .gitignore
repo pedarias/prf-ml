@@ -1,5 +1,5 @@
 mlruns/
-*.png
+src/*.png
 __pycache__/
 catboost_info/
 classes-com-peso/
