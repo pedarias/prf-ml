@@ -1,5 +1,5 @@
 # Previsão de Gravidade de Acidentes de Trânsito nas Rodovias Federais do Brasil
-
+![Arquitetura](images/architecture.jpeg)
 
 ## Introdução
 
