@@ -126,7 +126,7 @@ Após testar diferentes modelos e diferente técnicas de balanceamento aplicadas
 
 5. **Deploy do Modelo**
 - **API**: Implementada com FastAPI no arquivo ``app.py``, disponibilizando o endpoint /predict para realizar previsões.
-- **Interface We**: Desenvolvida com Streamlit no arquivo ``app_streamlit.py``, proporcionando uma interface amigável para inserção de dados e visualização das previsões.
+- **Interface Web**: Desenvolvida com Streamlit no arquivo ``app_streamlit.py``, proporcionando uma interface amigável para inserção de dados e visualização das previsões.
 - **Containerização**: Uso do Docker para containerizar a aplicação, facilitando a implantação em diferentes ambientes.
 
 #### Arquivos Docker
@@ -156,8 +156,8 @@ Após testar diferentes modelos e diferente técnicas de balanceamento aplicadas
 ## Como executar o Projeto
 1. Clone o Repositório:
 ```bash
-git clone <URL_DO_REPOSITORIO>
-cd <NOME_DO_REPOSITORIO>
+git clone git@github.com:pedarias/prf-ml.git
+cd prf-ml
 ```
 2. Baixe e Pré-processe os Dados:
 
